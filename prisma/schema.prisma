@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String
+  country   String
+  currency  String
+  active    Boolean  @default(true)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  prices    SupplierPriceItem[]
+}
+
+model SupplierPriceItem {
+  id         String   @id @default(cuid())
+  itemType   String
+  itemCode   String
+  itemName   String
+  unit       String
+  currency   String
+  unitPrice  Decimal  @db.Decimal(14, 6)
+  validFrom  DateTime
+  active     Boolean  @default(true)
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  createdAt  DateTime @default(now())
+  @@index([itemCode, active])
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  sku           String   @unique
+  name          String
+  category      String
+  productType   Int
+  wastePct      Decimal  @db.Decimal(6, 3)
+  active        Boolean  @default(true)
+  notes         String?
+  productionRate Decimal? @db.Decimal(14, 6)
+  spec          ProductSpec?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ProductSpec {
+  id        String   @id @default(cuid())
+  productId String   @unique
+  payload   Json
+  product   Product  @relation(fields: [productId], references: [id])
+}
+
+model OverheadSet {
+  id             String   @id @default(cuid())
+  effectiveDate  DateTime
+  labourAnnual   Decimal  @db.Decimal(14, 2)
+  factoryAnnual  Decimal  @db.Decimal(14, 2)
+  operatingAnnual Decimal @db.Decimal(14, 2)
+  machineCount   Int
+  workingDays    Int
+  hoursPerDay    Decimal  @db.Decimal(6, 2)
+  utilizationPct Decimal  @db.Decimal(6, 2)
+  isActive       Boolean  @default(true)
+}
+
+model MarginTable {
+  id        String   @id @default(cuid())
+  category  String
+  tier      Int
+  marginPct Decimal  @db.Decimal(6, 3)
+  isLive    Boolean  @default(false)
+  @@unique([category, tier, isLive])
+}
+
+model ImportBatch {
+  id          String   @id @default(cuid())
+  supplierId  String?
+  fileName    String
+  status      String
+  mapping     Json
+  createdAt   DateTime @default(now())
+  rows        ImportRow[]
+}
+
+model ImportRow {
+  id            String   @id @default(cuid())
+  batchId       String
+  sourceRow     Int
+  rawPayload    Json
+  matchStatus   String
+  matchedItemId String?
+  batch         ImportBatch @relation(fields: [batchId], references: [id])
+}
+
+model ProposedPriceChange {
+  id            String   @id @default(cuid())
+  batchId       String
+  itemCode      String
+  oldPrice      Decimal? @db.Decimal(14, 6)
+  newPrice      Decimal  @db.Decimal(14, 6)
+  deltaPct      Decimal? @db.Decimal(10, 4)
+  unitMismatch  Boolean  @default(false)
+  status        String
+}
+
+model PriceHistory {
+  id             String   @id @default(cuid())
+  itemCode       String
+  supplierId     String
+  oldPrice       Decimal  @db.Decimal(14, 6)
+  newPrice       Decimal  @db.Decimal(14, 6)
+  changedAt      DateTime @default(now())
+  batchId        String?
+}
+
+model RecalculationRun {
+  id          String   @id @default(cuid())
+  triggerType String
+  triggerRef  String
+  summary     Json
+  createdAt   DateTime @default(now())
+}
+
+model CostSnapshot {
+  id          String   @id @default(cuid())
+  sku         String
+  totalCost   Decimal  @db.Decimal(14, 6)
+  breakdown   Json
+  formulaVersion String
+  createdAt   DateTime @default(now())
+}
