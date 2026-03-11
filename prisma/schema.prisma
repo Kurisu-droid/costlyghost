@@ -36,38 +36,144 @@ model SupplierPriceItem {
 }
 
 model Product {
-  id            String   @id @default(cuid())
-  sku           String   @unique
-  name          String
-  category      String
-  productType   Int
-  wastePct      Decimal  @db.Decimal(6, 3)
-  active        Boolean  @default(true)
-  notes         String?
-  productionRate Decimal? @db.Decimal(14, 6)
-  spec          ProductSpec?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  sku                   String   @unique
+  name                  String
+  subcategoryId         String
+  productType           Int
+  status                String
+  wasteMode             String
+  wasteValue            Decimal  @db.Decimal(14, 6)
+  overheadSetOverrideId String?
+  notes                 String?
+  spec                  ProductSpec?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  costSnapshots         CostSnapshot[]
+  quoteLines            QuoteLine[]
 }
 
 model ProductSpec {
-  id        String   @id @default(cuid())
-  productId String   @unique
+  id        String  @id @default(cuid())
+  productId String  @unique
   payload   Json
-  product   Product  @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
 }
 
 model OverheadSet {
-  id             String   @id @default(cuid())
-  effectiveDate  DateTime
-  labourAnnual   Decimal  @db.Decimal(14, 2)
-  factoryAnnual  Decimal  @db.Decimal(14, 2)
-  operatingAnnual Decimal @db.Decimal(14, 2)
-  machineCount   Int
-  workingDays    Int
-  hoursPerDay    Decimal  @db.Decimal(6, 2)
-  utilizationPct Decimal  @db.Decimal(6, 2)
-  isActive       Boolean  @default(true)
+  id              String   @id @default(cuid())
+  effectiveDate   DateTime
+  labourAnnual    Decimal  @db.Decimal(14, 2)
+  factoryAnnual   Decimal  @db.Decimal(14, 2)
+  operatingAnnual Decimal  @db.Decimal(14, 2)
+  machineCount    Int
+  workingDays     Int
+  hoursPerDay     Decimal  @db.Decimal(6, 2)
+  utilizationPct  Decimal  @db.Decimal(6, 4)
+  isActive        Boolean  @default(true)
+}
+
+model ExpenseDefinition {
+  id                    String   @id @default(cuid())
+  code                  String   @unique
+  sectionEnum           String
+  category              String
+  nameEl                String
+  nameEn                String
+  unit                  String
+  importableFromInvoice Boolean  @default(false)
+  allocationMethod      String
+  active                Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  valueVersions         ExpenseValueVersion[]
+  importMatches         ExpenseImportMatch[]
+  allocationRules       ExpenseAllocationRule[]
+
+  @@map("expense_definitions")
+}
+
+model ExpenseValueVersion {
+  id                  String   @id @default(cuid())
+  expenseDefinitionId String
+  periodYear          Int
+  periodMonth         Int?
+  amount              Decimal  @db.Decimal(14, 2)
+  currency            String
+  sourceType          String
+  sourceBatchId       String?
+  notes               String?
+  approvedBy          String?
+  approvedAt          DateTime?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  definition          ExpenseDefinition @relation(fields: [expenseDefinitionId], references: [id])
+
+  @@index([periodYear, periodMonth])
+  @@map("expense_value_versions")
+}
+
+model ProductionParameterVersion {
+  id                 String   @id @default(cuid())
+  wastePercent       Decimal  @db.Decimal(8, 4)
+  activeMachines     Int
+  workingDaysPerYear Int
+  hoursPerDay        Decimal  @db.Decimal(8, 2)
+  utilizationPercent Decimal  @db.Decimal(8, 4)
+  totalMachines      Int
+  effectiveFrom      DateTime
+  approvedAt         DateTime?
+  createdAt          DateTime @default(now())
+  hourlySnapshots    HourlyCostSnapshot[]
+
+  @@map("production_parameter_versions")
+}
+
+model ExpenseImportMatch {
+  id                        String   @id @default(cuid())
+  sourceBatchId             String
+  sourceRowNumber           Int
+  supplierName              String
+  description               String
+  matchedExpenseDefinitionId String?
+  confidence                Decimal  @db.Decimal(8, 4)
+  status                    String
+  createdAt                 DateTime @default(now())
+  definition                ExpenseDefinition? @relation(fields: [matchedExpenseDefinitionId], references: [id])
+
+  @@index([sourceBatchId, sourceRowNumber])
+  @@map("expense_import_matches")
+}
+
+model ExpenseAllocationRule {
+  id                  String   @id @default(cuid())
+  expenseDefinitionId String
+  allocationMethod    String
+  productCategory     String?
+  ratio               Decimal  @db.Decimal(10, 6)
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  definition          ExpenseDefinition @relation(fields: [expenseDefinitionId], references: [id])
+
+  @@map("expense_allocation_rules")
+}
+
+model HourlyCostSnapshot {
+  id                    String   @id @default(cuid())
+  periodYear            Int
+  labourTotal           Decimal  @db.Decimal(14, 2)
+  factoryOverheadTotal  Decimal  @db.Decimal(14, 2)
+  operatingExpenseTotal Decimal  @db.Decimal(14, 2)
+  grandTotal            Decimal  @db.Decimal(14, 2)
+  grossHoursPerYear     Decimal  @db.Decimal(14, 4)
+  netHoursPerYear       Decimal  @db.Decimal(14, 4)
+  hourlyFactoryCost     Decimal  @db.Decimal(14, 6)
+  parameterVersionId    String
+  createdAt             DateTime @default(now())
+  parameterVersion      ProductionParameterVersion @relation(fields: [parameterVersionId], references: [id])
+
+  @@index([periodYear])
+  @@map("hourly_cost_snapshots")
 }
 
 model MarginTable {
@@ -80,44 +186,94 @@ model MarginTable {
 }
 
 model ImportBatch {
-  id          String   @id @default(cuid())
-  supplierId  String?
-  fileName    String
-  status      String
-  mapping     Json
-  createdAt   DateTime @default(now())
-  rows        ImportRow[]
+  id         String   @id @default(cuid())
+  supplierId String?
+  fileName   String
+  status     String
+  mapping    Json
+  createdAt  DateTime @default(now())
+  rows       ImportRow[]
+
+  @@map("import_batches")
 }
 
 model ImportRow {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   batchId       String
   sourceRow     Int
   rawPayload    Json
   matchStatus   String
   matchedItemId String?
   batch         ImportBatch @relation(fields: [batchId], references: [id])
+
+  @@map("import_rows")
+}
+
+
+
+model RowMatchCandidate {
+  id               String   @id @default(cuid())
+  batchId          String
+  rowId            String
+  candidateType    String
+  candidateRefId   String
+  confidence       Decimal  @db.Decimal(8, 4)
+  status           String
+  unitMismatch     Boolean  @default(false)
+  supplierAwareRank Int
+  createdAt        DateTime @default(now())
+
+  @@index([batchId, rowId])
+  @@map("row_match_candidates")
+}
+
+model ProposedExpenseUpdate {
+  id                 String   @id @default(cuid())
+  batchId            String
+  rowId              String
+  expenseDefinitionId String
+  periodYear         Int
+  periodMonth        Int?
+  amount             Decimal  @db.Decimal(14, 2)
+  currency           String
+  status             String
+  createdAt          DateTime @default(now())
+
+  @@index([batchId, status])
+  @@map("proposed_expense_updates")
+}
+
+model ImportMappingTemplate {
+  id           String   @id @default(cuid())
+  templateName String
+  sourceFormat String
+  mapping      Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([templateName, sourceFormat])
+  @@map("import_mapping_templates")
 }
 
 model ProposedPriceChange {
-  id            String   @id @default(cuid())
-  batchId       String
-  itemCode      String
-  oldPrice      Decimal? @db.Decimal(14, 6)
-  newPrice      Decimal  @db.Decimal(14, 6)
-  deltaPct      Decimal? @db.Decimal(10, 4)
-  unitMismatch  Boolean  @default(false)
-  status        String
+  id           String   @id @default(cuid())
+  batchId      String
+  itemCode     String
+  oldPrice     Decimal? @db.Decimal(14, 6)
+  newPrice     Decimal  @db.Decimal(14, 6)
+  deltaPct     Decimal? @db.Decimal(10, 4)
+  unitMismatch Boolean  @default(false)
+  status       String
 }
 
 model PriceHistory {
-  id             String   @id @default(cuid())
-  itemCode       String
-  supplierId     String
-  oldPrice       Decimal  @db.Decimal(14, 6)
-  newPrice       Decimal  @db.Decimal(14, 6)
-  changedAt      DateTime @default(now())
-  batchId        String?
+  id         String   @id @default(cuid())
+  itemCode   String
+  supplierId String
+  oldPrice   Decimal  @db.Decimal(14, 6)
+  newPrice   Decimal  @db.Decimal(14, 6)
+  changedAt  DateTime @default(now())
+  batchId    String?
 }
 
 model RecalculationRun {
@@ -129,10 +285,181 @@ model RecalculationRun {
 }
 
 model CostSnapshot {
-  id          String   @id @default(cuid())
-  sku         String
-  totalCost   Decimal  @db.Decimal(14, 6)
-  breakdown   Json
+  id             String   @id @default(cuid())
+  productId      String
+  totalCost      Decimal  @db.Decimal(14, 6)
+  breakdown      Json
   formulaVersion String
-  createdAt   DateTime @default(now())
+  createdAt      DateTime @default(now())
+  product        Product  @relation(fields: [productId], references: [id])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  code       String   @unique
+  name       String
+  vatNumber  String?  @map("vat_number")
+  email      String?
+  phone      String?
+  address    String?
+  city       String?
+  country    String?
+  notes      String?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  quotes     Quote[]
+  contacts   CustomerContact[]
+
+  @@map("customers")
+}
+
+model CustomerContact {
+  id         String   @id @default(cuid())
+  customerId String   @map("customer_id")
+  name       String
+  email      String?
+  phone      String?
+  role       String?
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  @@map("customer_contacts")
+}
+
+model Quote {
+  id            String   @id @default(cuid())
+  quoteNumber   String   @unique @map("quote_number")
+  customerId    String   @map("customer_id")
+  status        String
+  quoteDate     DateTime @map("quote_date")
+  validUntil    DateTime? @map("valid_until")
+  currency      String
+  subtotal      Decimal  @db.Decimal(14, 2)
+  discountTotal Decimal  @db.Decimal(14, 2) @map("discount_total")
+  total         Decimal  @db.Decimal(14, 2)
+  notes         String?
+  createdBy     String   @map("created_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+  customer      Customer @relation(fields: [customerId], references: [id])
+  lines         QuoteLine[]
+  statusHistory QuoteStatusHistory[]
+  pdfs          QuotePdf[]
+
+  @@map("quotes")
+}
+
+model QuoteLine {
+  id                  String   @id @default(cuid())
+  quoteId             String   @map("quote_id")
+  productId           String?  @map("product_id")
+  skuSnapshot         String   @map("sku_snapshot")
+  descriptionSnapshot String   @map("description_snapshot")
+  subcategorySnapshot String   @map("subcategory_snapshot")
+  quantity            Decimal  @db.Decimal(14, 3)
+  unitPrice           Decimal  @db.Decimal(14, 6) @map("unit_price")
+  discountPercent     Decimal  @db.Decimal(8, 4) @map("discount_percent")
+  lineTotal           Decimal  @db.Decimal(14, 2) @map("line_total")
+  priceSnapshotId     String?  @map("price_snapshot_id")
+  costSnapshotId      String?  @map("cost_snapshot_id")
+  quote               Quote    @relation(fields: [quoteId], references: [id])
+  product             Product? @relation(fields: [productId], references: [id])
+  snapshots           QuoteLinePriceSnapshot[]
+
+  @@map("quote_lines")
+}
+
+model QuoteLinePriceSnapshot {
+  id            String   @id @default(cuid())
+  quoteLineId   String
+  tier1Price    Decimal  @db.Decimal(14, 6)
+  tier2Price    Decimal  @db.Decimal(14, 6)
+  tier3Price    Decimal  @db.Decimal(14, 6)
+  tier4Price    Decimal  @db.Decimal(14, 6)
+  costReference Decimal  @db.Decimal(14, 6)
+  capturedAt    DateTime @default(now())
+  quoteLine     QuoteLine @relation(fields: [quoteLineId], references: [id])
+
+  @@map("quote_line_price_snapshots")
+}
+
+model QuoteStatusHistory {
+  id         String   @id @default(cuid())
+  quoteId    String   @map("quote_id")
+  status     String
+  changedAt  DateTime @default(now()) @map("changed_at")
+  changedBy  String   @map("changed_by")
+  quote      Quote    @relation(fields: [quoteId], references: [id])
+
+  @@map("quote_status_history")
+}
+
+model QuotePdf {
+  id        String   @id @default(cuid())
+  quoteId   String   @map("quote_id")
+  filePath  String   @map("file_path")
+  createdAt DateTime @default(now()) @map("created_at")
+  quote     Quote    @relation(fields: [quoteId], references: [id])
+
+  @@map("quote_pdfs")
+}
+
+
+model MarginProfile {
+  id         String   @id @default(cuid())
+  name       String
+  active     Boolean  @default(false)
+  state      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lines      MarginProfileLine[]
+
+  @@map("margin_profiles")
+}
+
+model MarginProfileLine {
+  id            String   @id @default(cuid())
+  profileId     String
+  category      String
+  subcategoryId String?
+  tier1Margin   Decimal  @db.Decimal(6, 3)
+  tier2Margin   Decimal  @db.Decimal(6, 3)
+  tier3Margin   Decimal  @db.Decimal(6, 3)
+  tier4Margin   Decimal  @db.Decimal(6, 3)
+  updatedAt     DateTime @updatedAt
+  profile       MarginProfile @relation(fields: [profileId], references: [id])
+
+  @@index([profileId, category, subcategoryId])
+  @@map("margin_profile_lines")
+}
+
+model PriceSnapshot {
+  id              String   @id @default(cuid())
+  sku             String
+  supplier        String
+  product         String
+  subcategory     String
+  meter           Decimal  @db.Decimal(14, 4)
+  micron          Decimal  @db.Decimal(14, 4)
+  eurPerKg        Decimal  @db.Decimal(14, 6)
+  costEur         Decimal  @db.Decimal(14, 6)
+  previousCostEur Decimal  @db.Decimal(14, 6)
+  price1          Decimal  @db.Decimal(14, 6)
+  price2          Decimal  @db.Decimal(14, 6)
+  price3          Decimal  @db.Decimal(14, 6)
+  price4          Decimal  @db.Decimal(14, 6)
+  freeCustom      String?
+  variancePct     Decimal  @db.Decimal(10, 4)
+  state           String
+  updatedAt       DateTime @default(now())
+
+  @@index([sku, updatedAt])
+  @@map("price_snapshots")
+}
+
+model DraftPriceList {
+  id        String   @id @default(cuid())
+  name      String
+  profileId String
+  createdAt DateTime @default(now())
+
+  @@map("draft_price_lists")
 }

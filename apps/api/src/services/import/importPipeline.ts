@@ -1,8 +1,16 @@
 import { parse } from 'csv-parse/sync';
 import XLSX from 'xlsx';
-import { MatchCandidate, ParsedImportRow, PriceItem, ProposedPriceChange } from '../../types/domain.js';
+import { ExpenseDefinition, ExpenseImportMatch, ExpenseValueVersion, MatchCandidate, ParsedImportRow, PriceItem, ProposedPriceChange } from '../../types/domain.js';
 
 export type ColumnMapping = Record<keyof Omit<ParsedImportRow, 'sourceRowNumber'>, string>;
+
+export interface ExpenseMappingProposal {
+  rowNumber: number;
+  expenseDefinitionId?: string;
+  status: 'exact' | 'possible' | 'none';
+  amount: number;
+  confidence: number;
+}
 
 export class ImportPipeline {
   parseBuffer(fileName: string, buffer: Buffer): Record<string, unknown>[] {
@@ -25,7 +33,8 @@ export class ImportPipeline {
       unit: String(raw[mapping.unit] ?? ''),
       unitPrice: Number(raw[mapping.unitPrice] ?? 0),
       totalValue: Number(raw[mapping.totalValue] ?? 0),
-      currency: String(raw[mapping.currency] ?? 'EUR')
+      currency: String(raw[mapping.currency] ?? 'EUR'),
+      expenseCategoryCode: String(raw[mapping.expenseCategoryCode] ?? '')
     }));
   }
 
@@ -71,6 +80,60 @@ export class ImportPipeline {
         deltaPct,
         unitMismatch,
         ignored: Math.abs(deltaPct) <= tolerancePct
+      };
+    });
+  }
+
+  detectExpenseMappings(rows: ParsedImportRow[], definitions: ExpenseDefinition[]): ExpenseMappingProposal[] {
+    const importable = definitions.filter((d) => d.importableFromInvoice && d.active);
+    return rows.map((row) => {
+      const exact = importable.find((item) => item.code.toLowerCase() === (row.expenseCategoryCode ?? '').toLowerCase());
+      if (exact) {
+        return { rowNumber: row.sourceRowNumber, expenseDefinitionId: exact.id, status: 'exact', amount: row.totalValue ?? row.unitPrice, confidence: 1 };
+      }
+      const possible = importable
+        .map((item) => ({ expenseDefinitionId: item.id, score: Math.max(similarity(row.itemDescription, item.nameEl), similarity(row.itemDescription, item.nameEn)) }))
+        .sort((a, b) => b.score - a.score)[0];
+      if (possible && possible.score >= 0.55) {
+        return { rowNumber: row.sourceRowNumber, expenseDefinitionId: possible.expenseDefinitionId, status: 'possible', amount: row.totalValue ?? row.unitPrice, confidence: possible.score };
+      }
+      return { rowNumber: row.sourceRowNumber, status: 'none', amount: row.totalValue ?? row.unitPrice, confidence: 0 };
+    });
+  }
+
+  toExpenseValueVersions(rows: ParsedImportRow[], proposals: ExpenseMappingProposal[], year: number, batchId?: string): ExpenseValueVersion[] {
+    return proposals
+      .filter((proposal) => proposal.status !== 'none' && proposal.expenseDefinitionId)
+      .map((proposal) => {
+        const row = rows.find((entry) => entry.sourceRowNumber === proposal.rowNumber);
+        return {
+          id: `ev-imp-${proposal.rowNumber}`,
+          expenseDefinitionId: proposal.expenseDefinitionId!,
+          periodYear: year,
+          periodMonth: row?.invoiceDate ? new Date(row.invoiceDate).getMonth() + 1 : null,
+          amount: proposal.amount,
+          currency: row?.currency ?? 'EUR',
+          sourceType: 'INVOICE_IMPORT',
+          sourceBatchId: batchId,
+          isActive: true,
+          createdAt: new Date().toISOString()
+        };
+      });
+  }
+
+  toImportMatches(rows: ParsedImportRow[], proposals: ExpenseMappingProposal[], batchId: string): ExpenseImportMatch[] {
+    return proposals.map((proposal) => {
+      const row = rows.find((entry) => entry.sourceRowNumber === proposal.rowNumber);
+      return {
+        id: `match-${batchId}-${proposal.rowNumber}`,
+        sourceBatchId: batchId,
+        sourceRowNumber: proposal.rowNumber,
+        supplierName: row?.supplierName ?? '',
+        description: row?.itemDescription ?? '',
+        matchedExpenseDefinitionId: proposal.expenseDefinitionId,
+        confidence: proposal.confidence,
+        status: proposal.status,
+        createdAt: new Date().toISOString()
       };
     });
   }

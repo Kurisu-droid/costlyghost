@@ -9,7 +9,7 @@ export class ApprovalService {
     proposals: ProposedPriceChange[],
     prices: PriceItem[],
     products: ProductSpec[],
-    overhead: OverheadSet
+    overheadResolver: (product: ProductSpec) => OverheadSet
   ) {
     const approved = proposals.filter((p) => !p.ignored && p.status !== 'none' && !p.unitMismatch && p.itemId);
     const changedItemIds: string[] = [];
@@ -26,7 +26,8 @@ export class ApprovalService {
 
     const engine = new CostingEngine(prices);
     const affectedSkus = engine.findAffectedSkus(products, changedItemIds);
-    const recalculated = engine.recalculateMany(products.filter((p) => affectedSkus.includes(p.sku)), overhead);
+    const affectedProducts = products.filter((p) => affectedSkus.includes(p.sku));
+    const recalculated = affectedProducts.map((product) => engine.recalculateProduct(product, overheadResolver(product)));
 
     this.audit.record({ eventType: 'RECALC_RUN', actor: 'system', before: null, after: { affectedSkus, changedItemIds } });
 
